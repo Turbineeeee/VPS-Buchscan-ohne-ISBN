@@ -181,16 +181,16 @@
 
 <div class="footer">Barcode läuft offline · Foto-Weg nutzt deinen n8n-Server · Excel Spalten B–I</div>
 
-<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/zxing-wasm@2.1.0/dist/iife/reader/index.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 /* ====== KONFIGURATION ====== */
-const WEBHOOK_URL = "https://n8n.srv1772176.hstgr.cloud/webhook/buch-upload";  /* wird gleich ersetzt */
+const WEBHOOK_URL = "https://n8n.srv1772176.hstgr.cloud/webhook/buch-upload";
 /* =========================== */
 
 const $=id=>document.getElementById(id);
 let books=[];
-let codeReader=null, activeStream=null, lastDecoded=null, lastTime=0;
+let activeStream=null, lastDecoded=null, lastTime=0;
 let photos={1:null,2:null};
 let dispo='';
 const dispoLabel={resell:'Weiterverkauf',platform:'Plattformen',discard:'Entsorgen'};
@@ -221,27 +221,49 @@ function switchPane(p){
   if(p!=='scan') stopCamera();
 }
 
-/* ---- camera barcode ---- */
+/* ---- camera barcode (zxing-wasm frame scanning) ---- */
+let scanTimer=null, scanCanvas=null, scanning=false;
 $('startBtn').onclick=startCamera;
 async function startCamera(){
   $('stage').className='stage';
   $('stage').innerHTML=`<video id="video" playsinline muted></video><div class="reticle"><div class="frame"></div></div><div class="hint">Barcode in den Rahmen halten</div>`;
-  try{activeStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:960}},audio:false});}
+  try{activeStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});}
   catch(e){toast('Kamera nicht verfügbar — ISBN bitte tippen.','bad');resetStage();return;}
-  const v=$('video');v.srcObject=activeStream;await v.play();loop();
+  const v=$('video');v.srcObject=activeStream;await v.play();
+  scanCanvas=document.createElement('canvas');
+  scanning=true;
+  scanLoop();
 }
-function resetStage(){$('stage').className='stage idle';$('stage').innerHTML='<button class="startbtn" id="startBtn">Kamera starten</button>';$('startBtn').onclick=startCamera;}
-function stopCamera(){if(codeReader){try{codeReader.reset();}catch(e){}codeReader=null;}if(activeStream){activeStream.getTracks().forEach(t=>t.stop());activeStream=null;}}
-function loop(){
-  const h=new Map();
-  h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[ZXing.BarcodeFormat.EAN_13,ZXing.BarcodeFormat.EAN_8,ZXing.BarcodeFormat.UPC_A,ZXing.BarcodeFormat.CODE_128]);
-  h.set(ZXing.DecodeHintType.TRY_HARDER,true);
-  codeReader=new ZXing.BrowserMultiFormatReader(h);
-  codeReader.decodeFromVideoElement($('video'),(res)=>{
-    if(res){const isbn=cleanIsbn(res.getText());
-      if(isbn){const now=Date.now();if(isbn===lastDecoded&&now-lastTime<2500)return;lastDecoded=isbn;lastTime=now;
-        $('sIsbn').value=isbn;beep();onScanned(isbn);}}
-  });
+function resetStage(){scanning=false;$('stage').className='stage idle';$('stage').innerHTML='<button class="startbtn" id="startBtn">Kamera starten</button>';$('startBtn').onclick=startCamera;}
+function stopCamera(){scanning=false;if(scanTimer){clearTimeout(scanTimer);scanTimer=null;}if(activeStream){activeStream.getTracks().forEach(t=>t.stop());activeStream=null;}}
+
+async function scanLoop(){
+  if(!scanning) return;
+  const v=$('video');
+  if(v && v.videoWidth>0){
+    try{
+      const c=scanCanvas;
+      c.width=v.videoWidth; c.height=v.videoHeight;
+      const ctx=c.getContext('2d',{willReadFrequently:true});
+      ctx.drawImage(v,0,0,c.width,c.height);
+      const blob=await new Promise(res=>c.toBlob(res,'image/jpeg',0.85));
+      if(blob && window.ZXingWASM){
+        const results=await ZXingWASM.readBarcodes(blob,{tryHarder:true,formats:['EAN13','EAN8','UPCA','Code128'],maxNumberOfSymbols:1});
+        if(results && results.length){
+          const raw=results[0].text;
+          const isbn=cleanIsbn(raw);
+          if(isbn){
+            const now=Date.now();
+            if(!(isbn===lastDecoded && now-lastTime<2500)){
+              lastDecoded=isbn; lastTime=now;
+              $('sIsbn').value=isbn; beep(); onScanned(isbn);
+            }
+          }
+        }
+      }
+    }catch(e){ /* einzelner Frame-Fehler ignorieren, weiter scannen */ }
+  }
+  scanTimer=setTimeout(scanLoop, 400);
 }
 $('sIsbn').addEventListener('keydown',e=>{if(e.key==='Enter'){const i=cleanIsbn($('sIsbn').value);if(i)onScanned(i);}});
 
