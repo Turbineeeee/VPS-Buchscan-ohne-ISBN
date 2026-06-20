@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#f3efe6">
+<title>Bucherfassung · Upload</title>
+<style>
+  :root{
+    --paper:#f3efe6; --paper-2:#e9e3d6; --ink:#22201b; --ink-soft:#5b554a;
+    --rule:#c9c0ad; --seal:#8a2b1f; --seal-soft:#b8503f; --ok:#3f6b3a;
+    --serif:"Iowan Old Style",Palatino,"Book Antiqua",Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --mono:"SF Mono",ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.5;
+    padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);}
+  .wrap{max-width:600px;margin:0 auto;padding:22px 18px 50px;}
+  header{border-bottom:2px solid var(--ink);padding-bottom:13px;margin-bottom:18px;}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--seal);font-weight:600;}
+  h1{font-family:var(--serif);font-size:25px;line-height:1.1;margin:6px 0 4px;font-weight:600;}
+  .sub{font-size:13px;color:var(--ink-soft);max-width:48ch;}
+
+  .slots{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  @media(max-width:440px){.slots{grid-template-columns:1fr;}}
+  .slot{position:relative;border:1.5px dashed var(--rule);border-radius:4px;background:var(--paper-2);
+    aspect-ratio:3/4;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;padding:14px;cursor:pointer;overflow:hidden;}
+  .slot.filled{border-style:solid;border-color:var(--ink);background:#000;}
+  .slot img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;}
+  .slot .num{font-family:var(--mono);font-size:11px;letter-spacing:.15em;color:var(--seal);font-weight:600;}
+  .slot .lbl{font-family:var(--serif);font-size:16px;margin-top:6px;}
+  .slot .desc{font-size:11px;color:var(--ink-soft);margin-top:4px;line-height:1.4;}
+  .slot input{position:absolute;inset:0;opacity:0;cursor:pointer;}
+  .slot .badge{position:absolute;top:8px;left:8px;background:var(--ink);color:var(--paper);
+    font-family:var(--mono);font-size:10px;padding:3px 7px;border-radius:3px;letter-spacing:.1em;z-index:2;}
+
+  .send{width:100%;margin-top:16px;background:var(--seal);color:#fdf6ec;border:none;border-radius:4px;
+    font-family:var(--serif);font-size:17px;font-weight:600;padding:15px;cursor:pointer;box-shadow:0 2px 0 #5e1c14;}
+  .send:disabled{opacity:.45;cursor:not-allowed;}
+  .send:active:not(:disabled){transform:translateY(2px);box-shadow:0 0 0 #5e1c14;}
+
+  .status{margin-top:16px;font-family:var(--mono);font-size:12px;color:var(--ink-soft);min-height:18px;line-height:1.6;word-break:break-word;}
+  .status.ok{color:var(--ok);}
+  .status.err{color:var(--seal);}
+  .result{margin-top:12px;background:#21201b;color:#d6cdb8;padding:14px;border-radius:4px;
+    font-family:var(--mono);font-size:11px;overflow-x:auto;line-height:1.55;display:none;white-space:pre-wrap;word-break:break-word;}
+  .result.show{display:block;}
+  footer{margin-top:28px;padding-top:13px;border-top:1px solid var(--rule);
+    font-family:var(--mono);font-size:11px;color:var(--ink-soft);line-height:1.6;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Bucherfassung · Foto-Upload</div>
+    <h1>Zwei Fotos senden</h1>
+    <p class="sub">Vorderer Buchdeckel und Titelblatt. Beide werden an deinen Server geschickt.</p>
+  </header>
+
+  <div class="slots">
+    <label class="slot" id="slot1">
+      <div class="num">Foto 01</div>
+      <div class="lbl">Vorderer Buchdeckel</div>
+      <div class="desc">Titel, meist Autor</div>
+      <input type="file" accept="image/*" capture="environment" id="file1">
+    </label>
+    <label class="slot" id="slot2">
+      <div class="num">Foto 02</div>
+      <div class="lbl">Titelblatt / Impressum</div>
+      <div class="desc">Verlag, Co-Autor, Jahr</div>
+      <input type="file" accept="image/*" capture="environment" id="file2">
+    </label>
+  </div>
+
+  <button class="send" id="sendBtn" disabled>An Server senden</button>
+  <div class="status" id="status"></div>
+  <div class="result" id="result"></div>
+
+  <footer>
+    Testlauf · sendet an n8n-Webhook<br>
+    Antwort des Servers erscheint unten.
+  </footer>
+</div>
+
+<script>
+const WEBHOOK_URL="https://n8n.srv1772176.hstgr.cloud/webhook-test/buch-upload";
+const files={1:null,2:null};
+const $=id=>document.getElementById(id);
+
+function hook(n){
+  const input=$('file'+n), slot=$('slot'+n);
+  input.addEventListener('change',e=>{
+    const f=e.target.files[0]; if(!f) return;
+    files[n]=f;
+    const url=URL.createObjectURL(f);
+    slot.classList.add('filled');
+    slot.querySelectorAll('.num,.lbl,.desc').forEach(el=>el.style.display='none');
+    let img=slot.querySelector('img'); if(!img){img=document.createElement('img');slot.appendChild(img);}
+    img.src=url;
+    let badge=slot.querySelector('.badge');
+    if(!badge){badge=document.createElement('div');badge.className='badge';slot.appendChild(badge);}
+    badge.textContent='Foto 0'+n;
+    $('sendBtn').disabled=!(files[1]&&files[2]);
+  });
+}
+hook(1);hook(2);
+
+function setStatus(msg,kind){const s=$('status');s.textContent=msg;s.className='status'+(kind?' '+kind:'');}
+
+$('sendBtn').addEventListener('click',async()=>{
+  if(!(files[1]&&files[2])) return;
+  $('sendBtn').disabled=true;
+  $('result').classList.remove('show');
+  setStatus('Fotos werden gesendet …');
+  try{
+    const fd=new FormData();
+    fd.append('cover',files[1],files[1].name||'cover.jpg');
+    fd.append('title_page',files[2],files[2].name||'title.jpg');
+    const resp=await fetch(WEBHOOK_URL,{method:'POST',body:fd});
+    const text=await resp.text();
+    if(resp.ok){
+      setStatus('✓ Angekommen — der Server hat die Fotos empfangen.','ok');
+    }else{
+      setStatus('Server antwortete mit Status '+resp.status+'. Details unten.','err');
+    }
+    if(text){ $('result').textContent=text; $('result').classList.add('show'); }
+  }catch(err){
+    setStatus('Verbindung fehlgeschlagen: '+err.message+'. Lauscht n8n gerade (Listen for Test Event)?','err');
+  }finally{
+    $('sendBtn').disabled=!(files[1]&&files[2]);
+  }
+});
+</script>
+</body>
+</html>
