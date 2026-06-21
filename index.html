@@ -236,10 +236,29 @@ function switchPane(p){
   $('tabPhoto').classList.toggle('on',p==='photo');
   $('paneScan').classList.toggle('on',p==='scan');
   $('panePhoto').classList.toggle('on',p==='photo');
-  if(p!=='scan') stopCamera();
 }
 
 /* ---- barcode via Foto-Schnappschuss (Kamera oder Galerie) ---- */
+/* WASM-Modul vorbereiten: .wasm-Datei explizit laden, sonst erkennt readBarcodes nichts */
+let zxingReady=false;
+(function initZXing(){
+  if(!window.ZXingWASM || !window.ZXingWASM.prepareZXingModule){
+    setTimeout(initZXing,300); return;
+  }
+  try{
+    window.ZXingWASM.prepareZXingModule({
+      overrides:{
+        locateFile:(path,prefix)=>{
+          if(path.endsWith('.wasm')) return 'https://cdn.jsdelivr.net/npm/zxing-wasm@2.1.0/dist/reader/'+path;
+          return prefix+path;
+        }
+      },
+      fireImmediately:true
+    }).then(()=>{ zxingReady=true; setBc('Scanner bereit.',''); })
+      .catch(err=>{ setBc('Scanner konnte nicht laden: '+err.message,'err'); });
+  }catch(e){ setBc('Scanner-Init fehlgeschlagen: '+e.message,'err'); }
+})();
+
 $('bcCam').addEventListener('change',e=>readBarcodePhoto(e.target.files[0]));
 $('bcPick').addEventListener('change',e=>readBarcodePhoto(e.target.files[0]));
 
@@ -247,12 +266,12 @@ async function readBarcodePhoto(file){
   if(!file) return;
   setBc('Barcode wird gelesen …','busy');
   try{
-    if(!window.ZXingWASM){ setBc('Scanner lädt noch — gleich nochmal versuchen.','err'); return; }
+    if(!window.ZXingWASM){ setBc('Scanner noch nicht geladen — kurz warten, dann erneut.','err'); return; }
     const results=await ZXingWASM.readBarcodes(file,{tryHarder:true,formats:['EAN13','EAN8','UPCA','Code128'],maxNumberOfSymbols:1});
     if(results && results.length){
       const isbn=cleanIsbn(results[0].text);
       if(isbn){ $('sIsbn').value=isbn; beep(); setBc('✓ '+isbn,''); onScanned(isbn); return; }
-      setBc('Code gelesen, aber keine gültige ISBN. Bitte näher/schärfer fotografieren.','err');
+      setBc('Code gelesen ('+results[0].text+'), aber keine gültige ISBN.','err');
     }else{
       setBc('Kein Barcode erkannt. Barcode größer und schärfer ins Bild, dann erneut.','err');
     }
