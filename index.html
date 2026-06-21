@@ -321,19 +321,51 @@ function setBc(m,k){const s=$('bcStatus');s.textContent=m;s.className='status'+(
 $('sIsbn').addEventListener('keydown',e=>{if(e.key==='Enter'){const i=cleanIsbn($('sIsbn').value);if(i)onScanned(i);}});
 
 /* scanned ISBN → fill shared form + lookup title */
+const ISBN_LOOKUP_URL = "https://n8n.srv1772176.hstgr.cloud/webhook/isbn-lookup";
+let lastCover='', lastSeiten='', lastSprache='';
+
 async function onScanned(isbn){
   showForm();
   $('fIsbn').value=isbn;$('fTitle').value='';$('fAuthor').value='';$('fYear').value='';
+  lastCover='';lastSeiten='';lastSprache='';
   buildEuro();
   toast(`ISBN <b>${isbn}</b> erkannt`,'ok');
+  setBc('Suche Buchdaten …','busy');
   try{
-    const r=await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
-    if(r.ok){const d=await r.json();const v=d.items&&d.items[0]&&d.items[0].volumeInfo;
-      if(v){$('fTitle').value=v.title?(v.subtitle?v.title+': '+v.subtitle:v.title):'';
-        $('fAuthor').value=(v.authors&&v.authors.join(', '))||'';
-        $('fYear').value=(v.publishedDate||'').slice(0,4);}}
-  }catch(e){}
-  buildEuro();refreshAdd();
+    const r=await fetch(`${ISBN_LOOKUP_URL}?isbn=${encodeURIComponent(isbn)}`);
+    if(!r.ok) throw new Error('Server '+r.status);
+    const d=await r.json();
+    if(d && d.gefunden){
+      $('fTitle').value=d.titel||'';
+      $('fAuthor').value=d.autor||'';
+      $('fYear').value=d.erscheinungsjahr||'';
+      lastCover=d.cover||'';
+      lastSeiten=d.seiten||'';
+      lastSprache=d.sprache||'';
+      buildEuro(); refreshAdd();
+      showCoverPreview(lastCover);
+      setBc('✓ '+($('fTitle').value||'gefunden')+(d.quelle?' ('+d.quelle+')':''),'');
+    }else{
+      buildEuro(); refreshAdd();
+      setBc('Nicht in den Datenbanken (häufig bei alten/seltenen Büchern) — Titel manuell ergänzen.','err');
+    }
+  }catch(err){
+    buildEuro(); refreshAdd();
+    setBc('Keine Verbindung zum Buchdaten-Dienst — Titel manuell ergänzen.','err');
+  }
+}
+
+function showCoverPreview(url){
+  let box=$('coverPreview');
+  if(!url){ if(box) box.style.display='none'; return; }
+  if(!box){
+    box=document.createElement('img');
+    box.id='coverPreview';
+    box.style.cssText='display:block;max-height:120px;border-radius:8px;margin:4px auto 0;border:1px solid var(--line);';
+    const form=$('sharedForm'); form.insertBefore(box, form.firstChild);
+  }
+  box.src=url; box.style.display='block';
+  box.onerror=()=>{ box.style.display='none'; };
 }
 
 /* ---- photo / AI path ---- */
@@ -398,11 +430,13 @@ $('addBtn').onclick=()=>{
     isbn:cleanIsbn($('fIsbn').value)||$('fIsbn').value.trim(),
     year:$('fYear').value.trim(),edition:$('fEdition').value.trim(),
     author:$('fAuthor').value.trim(),title:$('fTitle').value.trim(),
-    shelf:$('fShelf').value.trim(),price:parsePrice($('fPrice').value),dispo
+    shelf:$('fShelf').value.trim(),price:parsePrice($('fPrice').value),dispo,
+    cover:lastCover,pages:lastSeiten,language:lastSprache
   };
   books.unshift(book);saveBooks();renderList();renderCounts();
   toast(`<b>${esc(book.title)}</b> hinzugefügt`,'ok');
   ['fTitle','fAuthor','fYear','fEdition','fIsbn','fShelf','fPrice','sIsbn'].forEach(id=>{if($(id))$(id).value='';});
+  lastCover='';lastSeiten='';lastSprache='';showCoverPreview('');
   $('fDispo').querySelectorAll('button').forEach(b=>b.classList.remove('on'));dispo='';
   $('sharedForm').style.display='none';setAi('',''); refreshAdd();
 };
@@ -416,7 +450,8 @@ function renderList(){
   el.innerHTML=books.map((b,i)=>{
     const meta=[b.isbn,b.year,b.author].filter(Boolean).join(' · ');
     const price=typeof b.price==='number'?b.price.toFixed(2).replace('.',',')+'€':'—';
-    return `<div class="row"><span class="dot ${b.dispo}"></span>
+    const thumb=b.cover?`<img src="${esc(b.cover)}" style="width:34px;height:48px;object-fit:cover;border-radius:4px;flex:0 0 auto;background:var(--panel-2);" onerror="this.style.display='none'">`:'';
+    return `<div class="row"><span class="dot ${b.dispo}"></span>${thumb}
       <div class="main"><div class="title">${esc(b.title||'(ohne Titel)')}</div><div class="sub">${esc(meta||'—')}</div></div>
       <span class="price">${price}</span><button class="del" onclick="delBook(${i})">×</button></div>`;
   }).join('');
@@ -426,11 +461,11 @@ function delBook(i){books.splice(i,1);saveBooks();renderList();renderCounts();}
 
 $('expBtn').onclick=()=>{
   if(!books.length){toast('Keine Bücher zum Exportieren.','bad');return;}
-  const header=['','ISBN/EAN','Erscheinungsjahr','Auflage','Autor','Buchtitel','Lagerfach','Preis','Verwertung'];
+  const header=['','ISBN/EAN','Erscheinungsjahr','Auflage','Autor','Buchtitel','Lagerfach','Preis','Verwertung','Seiten','Sprache'];
   const rows=[header];
-  books.slice().reverse().forEach(b=>rows.push(['',b.isbn||'',b.year||'',b.edition||'',b.author||'',b.title||'',b.shelf||'',(typeof b.price==='number'?b.price:''),dispoLabel[b.dispo]||'']));
+  books.slice().reverse().forEach(b=>rows.push(['',b.isbn||'',b.year||'',b.edition||'',b.author||'',b.title||'',b.shelf||'',(typeof b.price==='number'?b.price:''),dispoLabel[b.dispo]||'',b.pages||'',b.language||'']));
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[{wch:3},{wch:16},{wch:14},{wch:8},{wch:22},{wch:34},{wch:10},{wch:9},{wch:14}];
+  ws['!cols']=[{wch:3},{wch:16},{wch:14},{wch:8},{wch:22},{wch:34},{wch:10},{wch:9},{wch:14},{wch:8},{wch:12}];
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Bücher');
   XLSX.writeFile(wb,`bucherfassung_${new Date().toISOString().slice(0,10)}.xlsx`);
   toast('Excel-Datei erstellt.','ok');
