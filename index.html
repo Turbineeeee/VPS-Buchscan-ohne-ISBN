@@ -130,6 +130,7 @@
     <label class="analyzebtn" id="barcodePickLbl" style="display:block;text-align:center;cursor:pointer;margin-top:8px;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);">🖼 Aus Galerie wählen<input type="file" accept="image/*" id="bcPick" hidden></label>
   </div>
   <div class="status" id="bcStatus"></div>
+  <div id="qr-reader" style="display:none;"></div>
   <div class="field"><label>ISBN / EAN</label><input id="sIsbn" inputmode="numeric" placeholder="oder manuell tippen"></div>
 </div>
 
@@ -186,7 +187,7 @@
 
 <div class="footer">Barcode läuft offline · Foto-Weg nutzt deinen n8n-Server · Excel Spalten B–I</div>
 
-<script src="https://cdn.jsdelivr.net/npm/zxing-wasm@2.1.0/dist/iife/reader/index.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 /* ====== KONFIGURATION ====== */
@@ -238,26 +239,12 @@ function switchPane(p){
   $('panePhoto').classList.toggle('on',p==='photo');
 }
 
-/* ---- barcode via Foto-Schnappschuss (Kamera oder Galerie) ---- */
-/* WASM-Modul vorbereiten: .wasm-Datei explizit laden, sonst erkennt readBarcodes nichts */
-let zxingReady=false;
-(function initZXing(){
-  if(!window.ZXingWASM || !window.ZXingWASM.prepareZXingModule){
-    setTimeout(initZXing,300); return;
-  }
-  try{
-    window.ZXingWASM.prepareZXingModule({
-      overrides:{
-        locateFile:(path,prefix)=>{
-          if(path.endsWith('.wasm')) return 'https://cdn.jsdelivr.net/npm/zxing-wasm@2.1.0/dist/reader/'+path;
-          return prefix+path;
-        }
-      },
-      fireImmediately:true
-    }).then(()=>{ zxingReady=true; setBc('Scanner bereit.',''); })
-      .catch(err=>{ setBc('Scanner konnte nicht laden: '+err.message,'err'); });
-  }catch(e){ setBc('Scanner-Init fehlgeschlagen: '+e.message,'err'); }
-})();
+/* ---- barcode via Foto-Schnappschuss mit html5-qrcode ---- */
+let html5qr=null;
+function getScanner(){
+  if(!html5qr && window.Html5Qrcode){ html5qr=new Html5Qrcode('qr-reader',{verbose:false}); }
+  return html5qr;
+}
 
 $('bcCam').addEventListener('change',e=>readBarcodePhoto(e.target.files[0]));
 $('bcPick').addEventListener('change',e=>readBarcodePhoto(e.target.files[0]));
@@ -265,18 +252,15 @@ $('bcPick').addEventListener('change',e=>readBarcodePhoto(e.target.files[0]));
 async function readBarcodePhoto(file){
   if(!file) return;
   setBc('Barcode wird gelesen …','busy');
+  const scanner=getScanner();
+  if(!scanner){ setBc('Scanner noch nicht geladen — kurz warten, dann erneut.','err'); return; }
   try{
-    if(!window.ZXingWASM){ setBc('Scanner noch nicht geladen — kurz warten, dann erneut.','err'); return; }
-    const results=await ZXingWASM.readBarcodes(file,{tryHarder:true,formats:['EAN13','EAN8','UPCA','Code128'],maxNumberOfSymbols:1});
-    if(results && results.length){
-      const isbn=cleanIsbn(results[0].text);
-      if(isbn){ $('sIsbn').value=isbn; beep(); setBc('✓ '+isbn,''); onScanned(isbn); return; }
-      setBc('Code gelesen ('+results[0].text+'), aber keine gültige ISBN.','err');
-    }else{
-      setBc('Kein Barcode erkannt. Barcode größer und schärfer ins Bild, dann erneut.','err');
-    }
+    const decodedText=await scanner.scanFile(file,false);
+    const isbn=cleanIsbn(decodedText);
+    if(isbn){ $('sIsbn').value=isbn; beep(); setBc('✓ '+isbn,''); onScanned(isbn); }
+    else{ setBc('Code gelesen ('+decodedText+'), aber keine gültige ISBN.','err'); }
   }catch(err){
-    setBc('Fehler beim Lesen: '+err.message,'err');
+    setBc('Kein Barcode erkannt. Barcode größer, schärfer und gerade ins Bild, dann erneut.','err');
   }finally{
     $('bcCam').value=''; $('bcPick').value='';
   }
