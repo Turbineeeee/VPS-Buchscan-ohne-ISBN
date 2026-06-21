@@ -122,15 +122,10 @@
   <div class="tab" id="tabPhoto">📖 Foto (ohne ISBN)</div>
 </div>
 
-<!-- Barcode pane (Foto-Schnappschuss) -->
+<!-- Barcode pane (Live-Kamera mit Quagga2) -->
 <div class="pane on" id="paneScan">
-  <div class="uploadbox">
-    <p style="margin:0 0 8px;font-size:12px;color:var(--ink-dim);line-height:1.5;text-align:center;">Barcode formatfüllend und scharf fotografieren — oder aus der Galerie wählen.</p>
-    <label class="analyzebtn" id="barcodeShootLbl" style="display:block;text-align:center;cursor:pointer;">📷 Barcode fotografieren<input type="file" accept="image/*" capture="environment" id="bcCam" hidden></label>
-    <label class="analyzebtn" id="barcodePickLbl" style="display:block;text-align:center;cursor:pointer;margin-top:8px;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);">🖼 Aus Galerie wählen<input type="file" accept="image/*" id="bcPick" hidden></label>
-  </div>
+  <div class="stage idle" id="stage"><button class="startbtn" id="startBtn">📷 Kamera starten</button></div>
   <div class="status" id="bcStatus"></div>
-  <div id="qr-reader" style="display:none;"></div>
   <div class="field"><label>ISBN / EAN</label><input id="sIsbn" inputmode="numeric" placeholder="oder manuell tippen"></div>
 </div>
 
@@ -187,7 +182,7 @@
 
 <div class="footer">Barcode läuft offline · Foto-Weg nutzt deinen n8n-Server · Excel Spalten B–I</div>
 
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 /* ====== KONFIGURATION ====== */
@@ -237,33 +232,57 @@ function switchPane(p){
   $('tabPhoto').classList.toggle('on',p==='photo');
   $('paneScan').classList.toggle('on',p==='scan');
   $('panePhoto').classList.toggle('on',p==='photo');
+  if(p!=='scan' && typeof stopScan==='function' && quaggaRunning) stopScan();
 }
 
-/* ---- barcode via Foto-Schnappschuss mit html5-qrcode ---- */
-let html5qr=null;
-function getScanner(){
-  if(!html5qr && window.Html5Qrcode){ html5qr=new Html5Qrcode('qr-reader',{verbose:false}); }
-  return html5qr;
+/* ---- barcode via Live-Kamera mit Quagga2 ---- */
+let quaggaRunning=false;
+$('startBtn').onclick=startScan;
+
+function startScan(){
+  $('stage').className='stage';
+  $('stage').innerHTML='<div id="qbox" style="width:100%;height:100%;"></div><div class="reticle"><div class="frame"></div></div><div class="hint">Barcode in den Rahmen halten</div>';
+  setBc('Kamera startet …','busy');
+  if(!window.Quagga){ setBc('Scanner-Bibliothek nicht geladen.','err'); return; }
+  Quagga.init({
+    inputStream:{
+      type:'LiveStream',
+      target:document.getElementById('qbox'),
+      constraints:{ facingMode:'environment', width:{ideal:1280}, height:{ideal:720} }
+    },
+    locator:{ patchSize:'medium', halfSample:true },
+    numOfWorkers: (navigator.hardwareConcurrency||2),
+    frequency:10,
+    decoder:{ readers:['ean_reader','ean_8_reader','upc_reader','upc_e_reader'] },
+    locate:true
+  }, err=>{
+    if(err){ setBc('Kamera-Fehler: '+err.message+' (Kamerazugriff erlaubt?)','err'); return; }
+    Quagga.start(); quaggaRunning=true; setBc('Bereit — Barcode in den Rahmen halten.','');
+  });
+
+  let lastCode=null, lastT=0, hitCount={};
+  Quagga.offDetected(); // doppelte Listener vermeiden
+  Quagga.onDetected(result=>{
+    const code=result && result.codeResult && result.codeResult.code;
+    if(!code) return;
+    // Mehrfachbestätigung: gleicher Code muss 2x kommen (gegen Fehllesungen)
+    hitCount[code]=(hitCount[code]||0)+1;
+    if(hitCount[code]<2) return;
+    const isbn=cleanIsbn(code);
+    if(!isbn){ return; }
+    const now=Date.now();
+    if(isbn===lastCode && now-lastT<3000) return;
+    lastCode=isbn; lastT=now; hitCount={};
+    $('sIsbn').value=isbn; beep(); setBc('✓ '+isbn,'');
+    stopScan();
+    onScanned(isbn);
+  });
 }
-
-$('bcCam').addEventListener('change',e=>readBarcodePhoto(e.target.files[0]));
-$('bcPick').addEventListener('change',e=>readBarcodePhoto(e.target.files[0]));
-
-async function readBarcodePhoto(file){
-  if(!file) return;
-  setBc('Barcode wird gelesen …','busy');
-  const scanner=getScanner();
-  if(!scanner){ setBc('Scanner noch nicht geladen — kurz warten, dann erneut.','err'); return; }
-  try{
-    const decodedText=await scanner.scanFile(file,false);
-    const isbn=cleanIsbn(decodedText);
-    if(isbn){ $('sIsbn').value=isbn; beep(); setBc('✓ '+isbn,''); onScanned(isbn); }
-    else{ setBc('Code gelesen ('+decodedText+'), aber keine gültige ISBN.','err'); }
-  }catch(err){
-    setBc('Kein Barcode erkannt. Barcode größer, schärfer und gerade ins Bild, dann erneut.','err');
-  }finally{
-    $('bcCam').value=''; $('bcPick').value='';
-  }
+function stopScan(){
+  if(quaggaRunning && window.Quagga){ try{Quagga.stop();}catch(e){} quaggaRunning=false; }
+  $('stage').className='stage idle';
+  $('stage').innerHTML='<button class="startbtn" id="startBtn">📷 Kamera starten</button>';
+  $('startBtn').onclick=startScan;
 }
 function setBc(m,k){const s=$('bcStatus');s.textContent=m;s.className='status'+(k?' '+k:'');}
 $('sIsbn').addEventListener('keydown',e=>{if(e.key==='Enter'){const i=cleanIsbn($('sIsbn').value);if(i)onScanned(i);}});
