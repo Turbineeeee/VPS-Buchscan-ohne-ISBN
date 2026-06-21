@@ -216,11 +216,12 @@ function v10(s){if(!/^\d{9}[\dX]$/.test(s))return false;let n=0;for(let i=0;i<10
 
 function eurobuchFor({isbn,title,author,year}){
   const i=cleanIsbn(isbn);
-  if(i) return `https://www.eurobuch.de/buch/isbn/${i}.html`;
+  if(i) return `https://www.eurobuch.de/buch/isbn/${i}.html?order=price&mode=p`;
   const p=new URLSearchParams();p.set('mediatype','13');
   if(author)p.set('author',author);
   let t=title||''; if(year)t=(t+' '+year).trim();
   if(t)p.set('title',t);
+  p.set('order','price');
   return 'https://www.eurobuch.de/search.php?'+p.toString();
 }
 
@@ -345,9 +346,11 @@ async function onScanned(isbn){
       buildEuro(); refreshAdd();
       showCoverPreview(lastCover);
       setBc('✓ '+($('fTitle').value||'gefunden')+(d.quelle?' ('+d.quelle+')':''),'');
+      openEurobuch();
     }else{
       buildEuro(); refreshAdd();
       setBc('Nicht in den Datenbanken (häufig bei alten/seltenen Büchern) — Titel manuell ergänzen.','err');
+      openEurobuch();
     }
   }catch(err){
     buildEuro(); refreshAdd();
@@ -420,6 +423,19 @@ $('fDispo').querySelectorAll('button').forEach(b=>{
 ['fTitle','fAuthor','fIsbn','fYear'].forEach(id=>$(id).addEventListener('input',()=>{buildEuro();refreshAdd();}));
 function buildEuro(){
   $('euroLink').href=eurobuchFor({isbn:$('fIsbn').value,title:$('fTitle').value,author:$('fAuthor').value,year:$('fYear').value});
+}
+function openEurobuch(){
+  const url=eurobuchFor({isbn:$('fIsbn').value,title:$('fTitle').value,author:$('fAuthor').value,year:$('fYear').value});
+  const win=window.open(url,'_blank');
+  // Popup blockiert? Dann Link auffällig hervorheben, damit ein Tipp genügt
+  if(!win || win.closed || typeof win.closed==='undefined'){
+    const el=$('euroLink');
+    el.style.background='var(--amber)';
+    el.style.color='var(--amber-ink)';
+    el.style.borderRadius='9px';
+    el.style.fontWeight='800';
+    el.textContent='→ eurobuch öffnen (tippen)';
+  }
 }
 function refreshAdd(){$('addBtn').disabled=!($('fTitle').value.trim() && dispo);}
 
