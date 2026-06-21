@@ -236,40 +236,43 @@ function switchPane(p){
 }
 
 /* ---- barcode via Live-Kamera mit Quagga2 ---- */
-let quaggaRunning=false;
+let quaggaRunning=false, torchTrack=null, torchOn=false;
 $('startBtn').onclick=startScan;
 
 function startScan(){
   $('stage').className='stage';
-  $('stage').innerHTML='<div id="qbox" style="width:100%;height:100%;"></div><div class="reticle"><div class="frame"></div></div><div class="hint">Barcode in den Rahmen halten</div>';
+  $('stage').innerHTML='<div id="qbox" style="width:100%;height:100%;"></div>'
+    +'<div class="reticle"><div class="frame"></div></div>'
+    +'<button id="torchBtn" style="display:none;position:absolute;top:10px;right:10px;z-index:5;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:10px;padding:8px 12px;font-size:13px;font-weight:700;">🔦 Licht</button>'
+    +'<div class="hint">Barcode in den Rahmen halten</div>';
   setBc('Kamera startet …','busy');
   if(!window.Quagga){ setBc('Scanner-Bibliothek nicht geladen.','err'); return; }
   Quagga.init({
     inputStream:{
       type:'LiveStream',
       target:document.getElementById('qbox'),
-      constraints:{ facingMode:'environment', width:{ideal:1280}, height:{ideal:720} }
+      constraints:{ facingMode:'environment' }   /* keine feste Auflösung -> kein Zoom-Beschnitt */
     },
-    locator:{ patchSize:'medium', halfSample:true },
-    numOfWorkers: (navigator.hardwareConcurrency||2),
+    locator:{ patchSize:'large', halfSample:false },
+    numOfWorkers:(navigator.hardwareConcurrency||2),
     frequency:10,
     decoder:{ readers:['ean_reader','ean_8_reader','upc_reader','upc_e_reader'] },
     locate:true
   }, err=>{
     if(err){ setBc('Kamera-Fehler: '+err.message+' (Kamerazugriff erlaubt?)','err'); return; }
     Quagga.start(); quaggaRunning=true; setBc('Bereit — Barcode in den Rahmen halten.','');
+    setupTorch();
   });
 
-  let lastCode=null, lastT=0, hitCount={};
-  Quagga.offDetected(); // doppelte Listener vermeiden
+  let hitCount={}, lastCode=null, lastT=0;
+  Quagga.offDetected();
   Quagga.onDetected(result=>{
     const code=result && result.codeResult && result.codeResult.code;
     if(!code) return;
-    // Mehrfachbestätigung: gleicher Code muss 2x kommen (gegen Fehllesungen)
     hitCount[code]=(hitCount[code]||0)+1;
     if(hitCount[code]<2) return;
     const isbn=cleanIsbn(code);
-    if(!isbn){ return; }
+    if(!isbn) return;
     const now=Date.now();
     if(isbn===lastCode && now-lastT<3000) return;
     lastCode=isbn; lastT=now; hitCount={};
@@ -278,8 +281,38 @@ function startScan(){
     onScanned(isbn);
   });
 }
+
+/* Taschenlampe: nur anzeigen wenn das Gerät sie unterstützt (oft nur Android) */
+function setupTorch(){
+  try{
+    const stream=Quagga.CameraAccess && Quagga.CameraAccess.getActiveStreamLabel ? null : null;
+    const tracks=(Quagga.CameraAccess && Quagga.CameraAccess.getActiveTrack) ? [Quagga.CameraAccess.getActiveTrack()] : [];
+    let track=tracks[0];
+    if(!track){
+      // Fallback: aus dem Video-Element den Track holen
+      const v=document.querySelector('#qbox video');
+      if(v && v.srcObject) track=v.srcObject.getVideoTracks()[0];
+    }
+    if(!track || !track.getCapabilities) return;
+    const caps=track.getCapabilities();
+    if(caps && caps.torch){
+      torchTrack=track;
+      const btn=$('torchBtn');
+      if(btn){ btn.style.display='block'; btn.onclick=toggleTorch; }
+    }
+  }catch(e){ /* Taschenlampe nicht verfügbar – Knopf bleibt versteckt */ }
+}
+function toggleTorch(){
+  if(!torchTrack) return;
+  torchOn=!torchOn;
+  torchTrack.applyConstraints({advanced:[{torch:torchOn}]})
+    .then(()=>{ const b=$('torchBtn'); if(b) b.style.background=torchOn?'rgba(224,167,46,.85)':'rgba(0,0,0,.55)'; })
+    .catch(()=>{ setBc('Taschenlampe nicht steuerbar auf diesem Gerät.','err'); });
+}
+
 function stopScan(){
   if(quaggaRunning && window.Quagga){ try{Quagga.stop();}catch(e){} quaggaRunning=false; }
+  torchTrack=null; torchOn=false;
   $('stage').className='stage idle';
   $('stage').innerHTML='<button class="startbtn" id="startBtn">📷 Kamera starten</button>';
   $('startBtn').onclick=startScan;
