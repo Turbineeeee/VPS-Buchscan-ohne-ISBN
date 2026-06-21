@@ -278,6 +278,11 @@ function startScan(){
     if(isbn===lastCode && now-lastT<3000) return;
     lastCode=isbn; lastT=now; hitCount={};
     $('sIsbn').value=isbn; beep(); setBc('✓ '+isbn,'');
+    // eurobuch sofort öffnen (ISBN reicht für den Link) – noch im Erkennungsmoment
+    const ebUrl=eurobuchFor({isbn:isbn});
+    const ebWin=window.open(ebUrl,'_blank');
+    euroAlreadyOpened=true;
+    if(!ebWin || ebWin.closed || typeof ebWin.closed==='undefined'){ euroBlocked=true; euroAlreadyOpened=false; }
     stopScan();
     onScanned(isbn);
   });
@@ -324,6 +329,7 @@ $('sIsbn').addEventListener('keydown',e=>{if(e.key==='Enter'){const i=cleanIsbn(
 /* scanned ISBN → fill shared form + lookup title */
 const ISBN_LOOKUP_URL = "https://n8n.srv1772176.hstgr.cloud/webhook/isbn-lookup";
 let lastCover='', lastSeiten='', lastSprache='';
+let euroBlocked=false, euroAlreadyOpened=false;
 
 async function onScanned(isbn){
   showForm();
@@ -346,16 +352,19 @@ async function onScanned(isbn){
       buildEuro(); refreshAdd();
       showCoverPreview(lastCover);
       setBc('✓ '+($('fTitle').value||'gefunden')+(d.quelle?' ('+d.quelle+')':''),'');
-      openEurobuch();
+      if(!euroAlreadyOpened) openEurobuch();
     }else{
       buildEuro(); refreshAdd();
       setBc('Nicht in den Datenbanken (häufig bei alten/seltenen Büchern) — Titel manuell ergänzen.','err');
-      openEurobuch();
+      if(!euroAlreadyOpened) openEurobuch();
     }
   }catch(err){
     buildEuro(); refreshAdd();
     setBc('Keine Verbindung zum Buchdaten-Dienst — Titel manuell ergänzen.','err');
   }
+  // Falls beim Scan blockiert: Link auffällig hervorheben
+  if(euroBlocked){ highlightEuroLink(); euroBlocked=false; }
+  euroAlreadyOpened=false;
 }
 
 function showCoverPreview(url){
@@ -422,20 +431,24 @@ $('fDispo').querySelectorAll('button').forEach(b=>{
 });
 ['fTitle','fAuthor','fIsbn','fYear'].forEach(id=>$(id).addEventListener('input',()=>{buildEuro();refreshAdd();}));
 function buildEuro(){
-  $('euroLink').href=eurobuchFor({isbn:$('fIsbn').value,title:$('fTitle').value,author:$('fAuthor').value,year:$('fYear').value});
+  const el=$('euroLink');
+  el.href=eurobuchFor({isbn:$('fIsbn').value,title:$('fTitle').value,author:$('fAuthor').value,year:$('fYear').value});
+  // Hervorhebung zurücksetzen
+  el.style.background=''; el.style.color=''; el.style.fontWeight='';
+  el.textContent='→ Wert auf eurobuch prüfen';
 }
 function openEurobuch(){
   const url=eurobuchFor({isbn:$('fIsbn').value,title:$('fTitle').value,author:$('fAuthor').value,year:$('fYear').value});
   const win=window.open(url,'_blank');
-  // Popup blockiert? Dann Link auffällig hervorheben, damit ein Tipp genügt
-  if(!win || win.closed || typeof win.closed==='undefined'){
-    const el=$('euroLink');
-    el.style.background='var(--amber)';
-    el.style.color='var(--amber-ink)';
-    el.style.borderRadius='9px';
-    el.style.fontWeight='800';
-    el.textContent='→ eurobuch öffnen (tippen)';
-  }
+  if(!win || win.closed || typeof win.closed==='undefined'){ highlightEuroLink(); }
+}
+function highlightEuroLink(){
+  const el=$('euroLink');
+  el.style.background='var(--amber)';
+  el.style.color='var(--amber-ink)';
+  el.style.borderRadius='9px';
+  el.style.fontWeight='800';
+  el.textContent='→ eurobuch öffnen (tippen)';
 }
 function refreshAdd(){$('addBtn').disabled=!($('fTitle').value.trim() && dispo);}
 
