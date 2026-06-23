@@ -80,6 +80,10 @@
   .dispo button.on[data-d="resell"]{background:var(--resell);border-color:var(--resell);color:#eafbef;}
   .dispo button.on[data-d="platform"]{background:var(--platform);border-color:var(--platform);color:#eaf3fb;}
   .dispo button.on[data-d="discard"]{background:var(--discard);border-color:var(--discard);color:#fbeae6;}
+  #fCondition button.on{background:var(--amber);border-color:var(--amber);color:var(--amber-ink);}
+  #fDefects button{padding:9px 11px;border-radius:9px;border:1.5px solid var(--line);
+    background:var(--panel);color:var(--ink-dim);font-size:12px;font-weight:700;}
+  #fDefects button.on{background:var(--discard);border-color:var(--discard);color:#fbeae6;}
 
   .eurolink{display:block;text-align:center;margin-top:4px;font-size:13px;color:var(--amber);text-decoration:none;font-weight:600;padding:8px;}
   .status{font-family:var(--mono);font-size:11px;color:var(--ink-dim);min-height:15px;padding:2px;line-height:1.5;}
@@ -126,7 +130,12 @@
 <div class="pane on" id="paneScan">
   <div class="stage idle" id="stage"><button class="startbtn" id="startBtn">📷 Kamera starten</button></div>
   <div class="status" id="bcStatus"></div>
-  <div class="field"><label>ISBN / EAN</label><input id="sIsbn" inputmode="numeric" placeholder="oder manuell tippen"></div>
+  <div class="field"><label>ISBN / EAN</label>
+    <div style="display:flex;gap:8px;">
+      <input id="sIsbn" inputmode="numeric" placeholder="oder manuell tippen" style="flex:1;">
+      <button id="sIsbnGo" style="display:none;background:var(--amber);color:var(--amber-ink);border:none;border-radius:9px;padding:0 16px;font-size:14px;font-weight:800;white-space:nowrap;">Suchen</button>
+    </div>
+  </div>
 </div>
 
 <!-- Photo pane -->
@@ -165,6 +174,30 @@
         <button data-d="discard">Entsorgen</button>
       </div>
     </div>
+
+    <div id="conditionBlock" style="display:none;">
+      <div class="field"><label>Zustand</label>
+        <div class="dispo" id="fCondition" style="flex-wrap:wrap;">
+          <button data-c="1" style="flex:1 1 45%;">Wie neu</button>
+          <button data-c="2" style="flex:1 1 45%;">Sehr gut</button>
+          <button data-c="3" style="flex:1 1 45%;">Gut</button>
+          <button data-c="4" style="flex:1 1 45%;">Befriedigend</button>
+        </div>
+      </div>
+      <div class="field"><label>Mängel (Mehrfachauswahl)</label>
+        <div id="fDefects" style="display:flex;flex-wrap:wrap;gap:7px;">
+          <button data-def="exlibris">Ex libris</button>
+          <button data-def="widmung">Pers. Widmung</button>
+          <button data-def="seitenlose">Seiten lose</button>
+          <button data-def="einband">Einband berieben</button>
+          <button data-def="nachgedunkelt">Seiten nachgedunkelt</button>
+          <button data-def="mark1">Markierung leicht</button>
+          <button data-def="mark2">Markierung mittel</button>
+          <button data-def="mark3">Markierung schwer</button>
+        </div>
+      </div>
+    </div>
+
     <button class="addbtn" id="addBtn" disabled>Zur Liste hinzufügen</button>
   </div>
 </div>
@@ -325,6 +358,15 @@ function stopScan(){
 }
 function setBc(m,k){const s=$('bcStatus');s.textContent=m;s.className='status'+(k?' '+k:'');}
 $('sIsbn').addEventListener('keydown',e=>{if(e.key==='Enter'){const i=cleanIsbn($('sIsbn').value);if(i)onScanned(i);}});
+// Button nur zeigen, wenn manuell getippt wird
+$('sIsbn').addEventListener('input',()=>{
+  $('sIsbnGo').style.display = $('sIsbn').value.trim() ? 'block' : 'none';
+});
+$('sIsbnGo').addEventListener('click',()=>{
+  const i=cleanIsbn($('sIsbn').value);
+  if(i){ onScanned(i); }
+  else { setBc('Bitte eine gültige ISBN/EAN eingeben.','err'); }
+});
 
 /* scanned ISBN → fill shared form + lookup title */
 const ISBN_LOOKUP_URL = "https://n8n.srv1772176.hstgr.cloud/webhook/isbn-lookup";
@@ -427,8 +469,36 @@ function setAi(m,k){const s=$('aiStatus');s.textContent=m;s.className='status'+(
 /* ---- shared form ---- */
 function showForm(){$('sharedForm').style.display='flex';}
 $('fDispo').querySelectorAll('button').forEach(b=>{
-  b.onclick=()=>{$('fDispo').querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');dispo=b.dataset.d;refreshAdd();};
+  b.onclick=()=>{
+    $('fDispo').querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');dispo=b.dataset.d;
+    // Zustand + Mängel nur bei Weiterverkauf
+    $('conditionBlock').style.display = (dispo==='resell') ? 'block' : 'none';
+    refreshAdd();
+  };
 });
+
+// Zustand: nur einer wählbar
+let condition='';
+$('fCondition').querySelectorAll('button').forEach(b=>{
+  b.onclick=()=>{
+    const was=b.classList.contains('on');
+    $('fCondition').querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+    if(!was){ b.classList.add('on'); condition=b.dataset.c; } else { condition=''; }
+    refreshAdd();
+  };
+});
+
+// Mängel: mehrere wählbar (Toggle)
+let defects=new Set();
+$('fDefects').querySelectorAll('button').forEach(b=>{
+  b.onclick=()=>{
+    const key=b.dataset.def;
+    if(defects.has(key)){ defects.delete(key); b.classList.remove('on'); }
+    else { defects.add(key); b.classList.add('on'); }
+  };
+});
+
 ['fTitle','fAuthor','fIsbn','fYear'].forEach(id=>$(id).addEventListener('input',()=>{buildEuro();refreshAdd();}));
 function buildEuro(){
   const el=$('euroLink');
@@ -460,13 +530,19 @@ $('addBtn').onclick=()=>{
     year:$('fYear').value.trim(),edition:$('fEdition').value.trim(),
     author:$('fAuthor').value.trim(),title:$('fTitle').value.trim(),
     shelf:$('fShelf').value.trim(),price:parsePrice($('fPrice').value),dispo,
-    cover:lastCover,pages:lastSeiten,language:lastSprache
+    cover:lastCover,pages:lastSeiten,language:lastSprache,
+    condition:(dispo==='resell'?condition:''),
+    defects:(dispo==='resell'?Array.from(defects):[])
   };
   books.unshift(book);saveBooks();renderList();renderCounts();
   toast(`<b>${esc(book.title)}</b> hinzugefügt`,'ok');
   ['fTitle','fAuthor','fYear','fEdition','fIsbn','fShelf','fPrice','sIsbn'].forEach(id=>{if($(id))$(id).value='';});
   lastCover='';lastSeiten='';lastSprache='';showCoverPreview('');
   $('fDispo').querySelectorAll('button').forEach(b=>b.classList.remove('on'));dispo='';
+  $('fCondition').querySelectorAll('button').forEach(b=>b.classList.remove('on'));condition='';
+  $('fDefects').querySelectorAll('button').forEach(b=>b.classList.remove('on'));defects.clear();
+  $('conditionBlock').style.display='none';
+  $('sIsbnGo').style.display='none';
   $('sharedForm').style.display='none';setAi('',''); refreshAdd();
 };
 
@@ -490,16 +566,79 @@ function delBook(i){books.splice(i,1);saveBooks();renderList();renderCounts();}
 
 $('expBtn').onclick=()=>{
   if(!books.length){toast('Keine Bücher zum Exportieren.','bad');return;}
-  const header=['','ISBN/EAN','Erscheinungsjahr','Auflage','Autor','Buchtitel','Lagerfach','Preis','Verwertung','Seiten','Sprache'];
+  // Spaltenindex: 0=A leer,1=B ISBN,2=C Jahr,3=D Auflage,4=E Autor,5=F Titel,
+  // 6=G Lagerfach,7=H Preis,8=I Verwertung,9=J Seiten,10=K Sprache,11=L Zustand,
+  // 14=O Ex libris/Widmung, 16=Q Markierung, 18=S Textmängel
+  const header=[];
+  header[0]='';header[1]='ISBN/EAN';header[2]='Erscheinungsjahr';header[3]='Auflage';
+  header[4]='Autor';header[5]='Buchtitel';header[6]='Lagerfach';header[7]='Preis';
+  header[8]='Verwertung';header[9]='Seiten';header[10]='Sprache';header[11]='Zustand';
+  header[14]='Anmerkung';header[16]='Markierung';header[18]='Mängel';
+  for(let i=0;i<19;i++) if(header[i]===undefined) header[i]='';
   const rows=[header];
-  books.slice().reverse().forEach(b=>rows.push(['',b.isbn||'',b.year||'',b.edition||'',b.author||'',b.title||'',b.shelf||'',(typeof b.price==='number'?b.price:''),dispoLabel[b.dispo]||'',b.pages||'',b.language||'']));
+
+  books.slice().reverse().forEach(b=>{
+    const def=b.defects||[];
+    const row=new Array(19).fill('');
+    row[1]=b.isbn||'';
+    row[2]=b.year||'';
+    row[3]=b.edition||'';
+    row[4]=b.author||'';
+    row[5]=b.title||'';
+    row[6]=b.shelf||'';
+    row[7]=(typeof b.price==='number'?b.price:'');
+    row[8]=dispoLabel[b.dispo]||'';
+    row[9]=b.pages||'';
+    row[10]=b.language||'';
+    row[11]=b.condition||'';                       // L: Zustand 1-4
+    // O (14): Ex libris="2", Pers. Widmung="1"
+    if(def.includes('widmung')) row[14]='1';
+    if(def.includes('exlibris')) row[14]='2';
+    // Q (16): Markierung leicht/mittel/schwer
+    if(def.includes('mark1')) row[16]='1';
+    if(def.includes('mark2')) row[16]='2';
+    if(def.includes('mark3')) row[16]='3';
+    // S (18): Textmängel, mit ", " getrennt
+    const sParts=[];
+    if(def.includes('seitenlose')) sParts.push('Seiten lose');
+    if(def.includes('einband')) sParts.push('Einband berieben');
+    if(def.includes('nachgedunkelt')) sParts.push('Seiten nachgedunkelt');
+    row[18]=sParts.join(', ');
+    rows.push(row);
+  });
+
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[{wch:3},{wch:16},{wch:14},{wch:8},{wch:22},{wch:34},{wch:10},{wch:9},{wch:14},{wch:8},{wch:12}];
+  ws['!cols']=[{wch:3},{wch:16},{wch:14},{wch:8},{wch:22},{wch:34},{wch:10},{wch:9},{wch:14},{wch:8},{wch:12},{wch:9},{wch:4},{wch:4},{wch:14},{wch:4},{wch:12},{wch:4},{wch:28}];
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Bücher');
   XLSX.writeFile(wb,`bucherfassung_${new Date().toISOString().slice(0,10)}.xlsx`);
   toast('Excel-Datei erstellt.','ok');
 };
-$('clearBtn').onclick=()=>{if(confirm('Alle erfassten Bücher löschen?')){books=[];saveBooks();renderList();renderCounts();}};
+$('clearBtn').onclick=()=>{
+  if(!books.length){ toast('Liste ist bereits leer.','bad'); return; }
+  showClearConfirm();
+};
+function showClearConfirm(){
+  let ov=document.getElementById('clearOverlay');
+  if(ov) ov.remove();
+  ov=document.createElement('div');
+  ov.id='clearOverlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;';
+  ov.innerHTML=`<div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;max-width:340px;width:100%;">
+    <div style="font-family:var(--serif);font-size:18px;font-weight:600;color:var(--ink);margin-bottom:8px;">Alle Bücher löschen?</div>
+    <div style="font-size:13px;color:var(--ink-dim);line-height:1.5;margin-bottom:18px;">${books.length} erfasste Bücher werden endgültig gelöscht. Hast du vorher exportiert?</div>
+    <div style="display:flex;gap:10px;">
+      <button id="clearCancel" style="flex:1;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:12px;font-size:14px;font-weight:700;">Abbrechen</button>
+      <button id="clearYes" style="flex:1;background:var(--discard);color:#fbeae6;border:none;border-radius:9px;padding:12px;font-size:14px;font-weight:800;">Löschen</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  document.getElementById('clearCancel').onclick=()=>ov.remove();
+  document.getElementById('clearYes').onclick=()=>{
+    books=[];saveBooks();renderList();renderCounts();
+    ov.remove();
+    toast('Alle Bücher gelöscht.','ok');
+  };
+}
 
 let tt=null;
 function toast(html,kind){const t=$('toast');t.innerHTML=html;t.className='toast on'+(kind?' '+kind:'');clearTimeout(tt);tt=setTimeout(()=>t.className='toast',3500);}
