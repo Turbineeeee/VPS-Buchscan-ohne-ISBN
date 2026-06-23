@@ -161,7 +161,10 @@
       <div class="field"><label>Auflage</label><input id="fEdition" placeholder="—"></div>
     </div>
     <div class="field"><label>ISBN / EAN</label><input id="fIsbn" inputmode="numeric" placeholder="—"></div>
-    <a class="eurolink" id="euroLink" href="#" target="_blank" rel="noopener">→ Wert auf eurobuch prüfen</a>
+    <div style="display:flex;gap:8px;margin-top:4px;">
+      <a class="eurolink" id="euroLink" href="#" target="_blank" rel="noopener" style="flex:1;border:1px solid var(--line);border-radius:9px;">→ eurobuch (Wert)</a>
+      <a class="eurolink" id="bonaLink" href="#" target="_blank" rel="noopener" style="flex:1;border:1px solid var(--line);border-radius:9px;">→ Bonavendi (Ankauf)</a>
+    </div>
     <div class="frow">
       <div class="field"><label>Verkaufspreis</label><div class="euro"><input id="fPrice" inputmode="decimal" placeholder="0,00"></div></div>
       <div class="field"><label>Lagerfach</label><input id="fShelf" placeholder="optional"></div>
@@ -512,12 +515,20 @@ $('fDefects').querySelectorAll('button').forEach(b=>{
 });
 
 ['fTitle','fAuthor','fIsbn','fYear'].forEach(id=>$(id).addEventListener('input',()=>{buildEuro();refreshAdd();}));
+function bonavendiFor(isbn){
+  const i=cleanIsbn(isbn);
+  if(!i) return 'https://www.bonavendi.de/verkaufen/buecher/';
+  return 'https://www.bonavendi.de/verkaufen/buecher/?searchText='+i;
+}
 function buildEuro(){
   const el=$('euroLink');
   el.href=eurobuchFor({isbn:$('fIsbn').value,title:$('fTitle').value,author:$('fAuthor').value,year:$('fYear').value});
   // Hervorhebung zurücksetzen
   el.style.background=''; el.style.color=''; el.style.fontWeight='';
-  el.textContent='→ Wert auf eurobuch prüfen';
+  el.textContent='→ eurobuch (Wert)';
+  // Bonavendi-Link setzen
+  const bl=$('bonaLink');
+  if(bl) bl.href=bonavendiFor($('fIsbn').value);
 }
 function openEurobuch(){
   const url=eurobuchFor({isbn:$('fIsbn').value,title:$('fTitle').value,author:$('fAuthor').value,year:$('fYear').value});
