@@ -141,11 +141,10 @@
 <!-- Photo pane -->
 <div class="pane" id="panePhoto">
   <div class="uploadbox">
-    <div class="uprow">
-      <label class="upslot" id="up1"><div class="ul">Buchdeckel</div><div class="ud">Titel, Autor</div><input type="file" accept="image/*" id="ph1"></label>
-      <label class="upslot" id="up2"><div class="ul">Titelblatt</div><div class="ud">Verlag, Jahr</div><input type="file" accept="image/*" id="ph2"></label>
-    </div>
-    <button class="analyzebtn" id="analyzeBtn" disabled>Mit KI erkennen</button>
+    <label class="analyzebtn" id="photoPickLbl" style="display:block;text-align:center;cursor:pointer;">📷 Fotos aufnehmen / wählen<input type="file" accept="image/*" multiple id="phMulti" hidden></label>
+    <p style="margin:8px 0 0;font-size:11px;color:var(--ink-dim);line-height:1.5;text-align:center;">Mehrere Fotos auf einmal (Cover, Titelblatt, Impressum) – die KI ordnet selbst zu.</p>
+    <div id="phPreview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
+    <button class="analyzebtn" id="analyzeBtn" disabled style="margin-top:8px;">Mit KI erkennen</button>
   </div>
   <div class="status" id="aiStatus"></div>
 </div>
@@ -238,7 +237,7 @@ function loadBooks(){
 }
 loadBooks();
 let activeStream=null, lastDecoded=null, lastTime=0;
-let photos={1:null,2:null};
+let photos=[];
 let dispo='';
 const dispoLabel={resell:'Weiterverkauf',platform:'Plattformen',discard:'Entsorgen'};
 
@@ -422,31 +421,46 @@ function showCoverPreview(url){
   box.onerror=()=>{ box.style.display='none'; };
 }
 
-/* ---- photo / AI path ---- */
-function hookPhoto(n){
-  $('ph'+n).addEventListener('change',e=>{
-    const f=e.target.files[0];if(!f)return;photos[n]=f;
-    const slot=$('up'+n);slot.classList.add('filled');
-    slot.querySelectorAll('.ul,.ud').forEach(el=>el.style.display='none');
-    let img=slot.querySelector('img');if(!img){img=document.createElement('img');slot.appendChild(img);}
+/* ---- photo / AI path (Mehrfach-Upload, KI ordnet selbst zu) ---- */
+$('phMulti').addEventListener('change',e=>{
+  const files=Array.from(e.target.files||[]);
+  files.forEach(f=>{ if(f && f.type.startsWith('image/')) photos.push(f); });
+  renderPhotoPreview();
+  $('phMulti').value='';
+});
+
+function renderPhotoPreview(){
+  const box=$('phPreview');
+  box.innerHTML='';
+  photos.forEach((f,i)=>{
+    const wrap=document.createElement('div');
+    wrap.style.cssText='position:relative;width:60px;height:80px;border-radius:6px;overflow:hidden;border:1px solid var(--line);';
+    const img=document.createElement('img');
     img.src=URL.createObjectURL(f);
-    $('analyzeBtn').disabled=!(photos[1]&&photos[2]);
+    img.style.cssText='width:100%;height:100%;object-fit:cover;';
+    const del=document.createElement('button');
+    del.textContent='×';
+    del.style.cssText='position:absolute;top:2px;right:2px;background:rgba(0,0,0,.65);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:14px;line-height:1;cursor:pointer;';
+    del.onclick=()=>{ photos.splice(i,1); renderPhotoPreview(); };
+    wrap.appendChild(img); wrap.appendChild(del);
+    box.appendChild(wrap);
   });
+  $('analyzeBtn').disabled = photos.length===0;
 }
-hookPhoto(1);hookPhoto(2);
 
 $('analyzeBtn').addEventListener('click',async()=>{
-  if(!(photos[1]&&photos[2]))return;
+  if(photos.length===0)return;
   if(WEBHOOK_URL.startsWith('PLATZHALTER')){setAi('Webhook-URL noch nicht eingetragen.','err');return;}
-  $('analyzeBtn').disabled=true;setAi('Fotos werden gesendet, KI liest …','busy');
+  $('analyzeBtn').disabled=true;setAi(`${photos.length} Foto(s) werden gesendet, KI liest …`,'busy');
   try{
     const fd=new FormData();
-    fd.append('cover',photos[1],photos[1].name||'cover.jpg');
-    fd.append('title_page',photos[2],photos[2].name||'title.jpg');
+    // Alle Fotos als bild1, bild2, … schicken – die KI ordnet selbst zu
+    photos.forEach((f,i)=>{ fd.append('bild'+(i+1),f,f.name||('bild'+(i+1)+'.jpg')); });
+    fd.append('anzahl',String(photos.length));
     const resp=await fetch(WEBHOOK_URL,{method:'POST',body:fd});
     if(!resp.ok)throw new Error('Server '+resp.status);
     const data=await resp.json();
-    const b=Array.isArray(data)?data[0]:data;   /* n8n liefert oft ein Array */
+    const b=Array.isArray(data)?data[0]:data;
     const j=b.json?b.json:b;
     showForm();
     $('fTitle').value=j.titel||'';
@@ -456,12 +470,10 @@ $('analyzeBtn').addEventListener('click',async()=>{
     $('fIsbn').value=j.isbn||'';
     buildEuro();refreshAdd();
     setAi('✓ Erkannt — bitte prüfen, Preis und Verwertung ergänzen.','');
-    photos={1:null,2:null};
-    [1,2].forEach(n=>{const s=$('up'+n);s.classList.remove('filled');const im=s.querySelector('img');if(im)im.remove();s.querySelectorAll('.ul,.ud').forEach(el=>el.style.display='');});
-    $('ph1').value='';$('ph2').value='';$('analyzeBtn').disabled=true;
+    photos=[]; renderPhotoPreview();
   }catch(err){
     setAi('Fehler: '+err.message+'. Läuft der Workflow (aktiv)?','err');
-    $('analyzeBtn').disabled=!(photos[1]&&photos[2]);
+    $('analyzeBtn').disabled=photos.length===0;
   }
 });
 function setAi(m,k){const s=$('aiStatus');s.textContent=m;s.className='status'+(k?' '+k:'');}
